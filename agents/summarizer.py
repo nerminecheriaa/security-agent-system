@@ -5,6 +5,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+DEFAULT_GROQ_MODEL = "openai/gpt-oss-20b"
+
 _llm = None
 
 def get_llm() -> ChatGroq:
@@ -20,7 +22,7 @@ def get_llm() -> ChatGroq:
                 "GROQ_API_KEY is not set. Add it to your .env file (see .env.example)."
             )
         _llm = ChatGroq(
-            model="llama-3.1-8b-instant",
+            model=os.getenv("GROQ_MODEL") or DEFAULT_GROQ_MODEL,
             api_key=api_key,
             temperature=0.3
         )
@@ -48,10 +50,13 @@ def summarizer_agent(keyword: str, cves: list) -> dict:
     # Formater les CVEs pour le prompt
     cve_text = ""
     for cve in cves:
+        # CVE récente pas encore analysée par NVD : pas de score ni de sévérité
+        score = cve['score'] if cve.get('score') is not None else "non évalué"
+        severity = cve['severity'] if cve.get('severity') is not None else "non évalué"
         cve_text += f"""
 - ID: {cve['id']}
   Description: {cve['description']}
-  CVSS Score: {cve['score']} | Severity: {cve['severity']}
+  CVSS Score: {score} | Severity: {severity}
   Published: {cve['published']}
   URL: {cve['url']}
 """

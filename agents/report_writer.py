@@ -37,10 +37,18 @@ def report_writer_agent(keyword: str, cves: list, summary: dict) -> dict:
 """
     # Détails de chaque CVE
     for cve in cves:
-        severity = str(cve.get('severity', 'N/A')).upper()
+        severity = cve.get('severity', 'N/A')
+        severity = str(severity).upper() if severity is not None else None
         emoji = {"CRITICAL": "🔴", "HIGH": "🟠", "MEDIUM": "🟡", "LOW": "🟢"}.get(severity, "⚪")
 
-        report += f"""### {emoji} {cve['id']} — Score: {cve['score']} ({severity})
+        # CVE récente pas encore analysée par NVD : pas de score ni de sévérité
+        score = cve.get('score')
+        if score is None and severity is None:
+            score_label = "Score: non évalué"
+        else:
+            score_label = f"Score: {score if score is not None else 'non évalué'} ({severity or 'non évalué'})"
+
+        report += f"""### {emoji} {cve['id']} — {score_label}
 **Published:** {cve['published']}
 **Description:** {cve['description']}
 **Reference:** [{cve['url']}]({cve['url']})

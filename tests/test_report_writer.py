@@ -51,3 +51,20 @@ def test_report_filename_format():
     assert re.fullmatch(r"report_apache_http_server_\d{8}_\d{4}\.md", result["filename"])
     assert "No analysis available." in result["report"]
     assert "**Total CVEs analyzed:** 0" in result["report"]
+
+
+def test_report_unscored_cve_shows_non_evalue():
+    unscored = {
+        "id": "CVE-2026-99999",
+        "description": "Awaiting analysis.",
+        "score": None,
+        "severity": None,
+        "published": "2026-10-04",
+        "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-99999",
+    }
+
+    report = report_writer_agent("apache", [unscored], {})["report"]
+
+    assert "### ⚪ CVE-2026-99999 — Score: non évalué" in report
+    assert "None" not in report
+    assert "NONE" not in report
