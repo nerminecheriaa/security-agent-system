@@ -4,7 +4,7 @@ from unittest.mock import MagicMock
 import pytest
 import requests
 
-from utils.nvd_client import NVDError, search_cves
+from utils.nvd_client import CVENotFoundError, NVDError, get_cve, search_cves
 
 
 def make_cve(cve_id, published):
@@ -170,3 +170,130 @@ def test_network_error_raises_nvd_error(monkeypatch):
 
     with pytest.raises(NVDError, match="down"):
         search_cves("apache")
+
+
+# ── get_cve ────────────────────────────────────────────────────────────────
+# Structure calquée sur la réponse réelle de NVD pour cveId=CVE-2021-44228
+LOG4SHELL = {"totalResults": 1, "vulnerabilities": [{"cve": {
+    "id": "CVE-2021-44228",
+    "published": "2021-12-10T10:15:09.143",
+    "lastModified": "2026-08-11T19:33:44.513",
+    "vulnStatus": "Analyzed",
+    "descriptions": [
+        {"lang": "en", "value": "Apache Log4j2 JNDI RCE."},
+        {"lang": "es", "value": "Descripción"},
+    ],
+    "metrics": {
+        "cvssMetricV31": [
+            {"source": "nvd@nist.gov", "type": "Primary", "cvssData": {
+                "version": "3.1", "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H",
+                "baseScore": 10.0, "baseSeverity": "CRITICAL"}},
+            {"source": "cna@example.org", "type": "Secondary", "cvssData": {
+                "version": "3.1", "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:C/C:H/I:H/A:H",
+                "baseScore": 9.0, "baseSeverity": "CRITICAL"}},
+        ],
+        "cvssMetricV2": [
+            {"source": "nvd@nist.gov", "type": "Primary", "baseSeverity": "HIGH", "cvssData": {
+                "version": "2.0", "vectorString": "AV:N/AC:M/Au:N/C:C/I:C/A:C", "baseScore": 9.3}},
+        ],
+        # Métrique non CVSS, sans cvssData : doit être ignorée
+        "ssvcV203": [{"source": "cna@example.org", "ssvcData": {}}],
+    },
+    "weaknesses": [
+        {"source": "security@apache.org", "type": "Secondary", "description": [
+            {"lang": "en", "value": "CWE-20"}, {"lang": "en", "value": "CWE-502"}]},
+        {"source": "nvd@nist.gov", "type": "Primary", "description": [
+            {"lang": "en", "value": "CWE-917"}, {"lang": "en", "value": "CWE-502"}]},
+    ],
+    "references": [
+        {"url": f"https://example.org/ref{i}", "source": "x", "tags": ["Patch"] if i == 0 else []}
+        for i in range(7)
+    ],
+}}]}
+
+
+def test_get_cve_returns_all_details(monkeypatch):
+    calls = mock_get(monkeypatch, LOG4SHELL)
+
+    cve = get_cve("CVE-2021-44228")
+
+    assert calls[0]["params"] == {"cveId": "CVE-2021-44228"}
+    assert cve["id"] == "CVE-2021-44228"
+    assert cve["description"] == "Apache Log4j2 JNDI RCE."
+    assert cve["score"] == 10.0
+    assert cve["severity"] == "CRITICAL"
+    assert cve["published"] == "2021-12-10"
+    assert cve["url"] == "https://nvd.nist.gov/vuln/detail/CVE-2021-44228"
+    assert cve["last_modified"] == "2026-08-11"
+    assert cve["vuln_status"] == "Analyzed"
+    assert cve["cwes"] == ["CWE-20", "CWE-502", "CWE-917"]
+    assert cve["cvss"] == [
+        {"version": "3.1", "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H",
+         "score": 10.0, "severity": "CRITICAL", "source": "nvd@nist.gov", "type": "Primary"},
+        {"version": "3.1", "vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:C/C:H/I:H/A:H",
+         "score": 9.0, "severity": "CRITICAL", "source": "cna@example.org", "type": "Secondary"},
+        # CVSS v2 : la sévérité est au niveau du metric, pas dans cvssData
+        {"version": "2.0", "vector": "AV:N/AC:M/Au:N/C:C/I:C/A:C",
+         "score": 9.3, "severity": "HIGH", "source": "nvd@nist.gov", "type": "Primary"},
+    ]
+    assert len(cve["references"]) == 5
+    assert cve["references"][0] == {"url": "https://example.org/ref0", "tags": ["Patch"]}
+
+
+def test_get_cve_unscored(monkeypatch):
+    raw = {"id": "CVE-2026-12345", "published": "2026-10-03T08:00:00.000",
+           "vulnStatus": "Received", "descriptions": [], "metrics": {}}
+    mock_get(monkeypatch, {"totalResults": 1, "vulnerabilities": [{"cve": raw}]})
+
+    cve = get_cve("CVE-2026-12345")
+
+    assert cve["score"] is None
+    assert cve["severity"] is None
+    assert cve["vuln_status"] == "Received"
+    assert cve["last_modified"] is None
+    assert cve["cwes"] == []
+    assert cve["cvss"] == []
+    assert cve["references"] == []
+
+
+def test_get_cve_not_found(monkeypatch):
+    # Comportement réel : HTTP 200 avec totalResults = 0
+    mock_get(monkeypatch, {"resultsPerPage": 0, "startIndex": 0, "totalResults": 0, "vulnerabilities": []})
+
+    with pytest.raises(CVENotFoundError, match="CVE-2099-99999 introuvable"):
+        get_cve("CVE-2099-99999")
+
+
+@pytest.mark.parametrize("cve_id", [
+    "",
+    "CVE-2021-123",
+    "CVE-21-44228",
+    "cve-2021-44228",
+    " CVE-2021-44228",
+    "CVE-2021-44228\n",
+    "CVE-2021-44228; DROP",
+    "CVE-٢٠٢١-44228",  # chiffres non ASCII
+])
+def test_get_cve_invalid_id_makes_no_network_call(monkeypatch, cve_id):
+    calls = mock_get(monkeypatch, LOG4SHELL)
+
+    with pytest.raises(ValueError, match="Identifiant CVE invalide"):
+        get_cve(cve_id)
+
+    assert calls == []
+
+
+def test_get_cve_network_error_raises_nvd_error(monkeypatch):
+    mock_get(monkeypatch, exc=requests.ConnectionError("down"))
+
+    with pytest.raises(NVDError, match="down"):
+        get_cve("CVE-2021-44228")
+
+
+def test_get_cve_sends_api_key_header(monkeypatch):
+    monkeypatch.setenv("NVD_API_KEY", "secret")
+    calls = mock_get(monkeypatch, LOG4SHELL)
+
+    get_cve("CVE-2021-44228")
+
+    assert calls[0]["headers"] == {"apiKey": "secret"}

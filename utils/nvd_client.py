@@ -1,5 +1,6 @@
 import requests
 import os
+import re
 from datetime import datetime, timedelta, timezone
 from typing import List, Literal, Optional, TypedDict
 
@@ -15,6 +16,9 @@ DEFAULT_DAYS_WITHOUT_KEYWORD = 30
 # Ordre de préférence des métriques CVSS (la plus récente d'abord)
 CVSS_METRICS = ("cvssMetricV40", "cvssMetricV31", "cvssMetricV30", "cvssMetricV2")
 
+CVE_ID_PATTERN = re.compile(r"^CVE-\d{4}-\d{4,}$", re.ASCII)
+MAX_REFERENCES = 5
+
 
 class CVE(TypedDict):
     id: str
@@ -25,8 +29,34 @@ class CVE(TypedDict):
     url: str
 
 
+class CVSSVector(TypedDict):
+    version: Optional[str]
+    vector: Optional[str]
+    score: Optional[float]
+    severity: Optional[str]
+    source: Optional[str]
+    type: Optional[str]
+
+
+class Reference(TypedDict):
+    url: str
+    tags: List[str]
+
+
+class CVEDetails(CVE):
+    last_modified: Optional[str]
+    vuln_status: Optional[str]
+    cwes: List[str]
+    cvss: List[CVSSVector]
+    references: List[Reference]
+
+
 class NVDError(Exception):
     """Erreur réseau ou HTTP lors d'un appel à l'API NVD."""
+
+
+class CVENotFoundError(LookupError):
+    """La CVE demandée n'existe pas dans la base NVD."""
 
 
 def resolve_days(keyword: Optional[str], days: Optional[int]) -> int:
@@ -159,3 +189,71 @@ def search_cves(
     cves = [_parse_cve(item.get("cve", {})) for item in data.get("vulnerabilities", [])]
     cves.reverse()
     return cves
+
+
+def _parse_cve_details(cve: dict) -> CVEDetails:
+    # CWE : dédoublonnées, toutes sources confondues (NVD et CNA)
+    cwes = []
+    for weakness in cve.get("weaknesses", []):
+        for d in weakness.get("description", []):
+            if d.get("lang") == "en" and d.get("value") and d["value"] not in cwes:
+                cwes.append(d["value"])
+
+    # Tous les vecteurs CVSS disponibles (les métriques non CVSS, ex. ssvcV203, sont ignorées)
+    cvss = []
+    for key in CVSS_METRICS:
+        for metric in cve.get("metrics", {}).get(key, []):
+            data = metric.get("cvssData", {})
+            cvss.append({
+                "version": data.get("version"),
+                "vector": data.get("vectorString"),
+                "score": data.get("baseScore"),
+                "severity": data.get("baseSeverity") or metric.get("baseSeverity"),
+                "source": metric.get("source"),
+                "type": metric.get("type"),
+            })
+
+    references = [
+        {"url": ref["url"], "tags": ref.get("tags", [])}
+        for ref in cve.get("references", [])[:MAX_REFERENCES]
+        if ref.get("url")
+    ]
+
+    last_modified = cve.get("lastModified")
+
+    return {
+        **_parse_cve(cve),
+        "last_modified": last_modified[:10] if last_modified else None,
+        "vuln_status": cve.get("vulnStatus"),
+        "cwes": cwes,
+        "cvss": cvss,
+        "references": references,
+    }
+
+
+def get_cve(cve_id: str) -> CVEDetails:
+    """
+    Récupère le détail d'une CVE sur la base NVD à partir de son identifiant.
+
+    Args:
+        cve_id: identifiant au format CVE-AAAA-NNNN (au moins 4 chiffres après l'année).
+
+    Returns:
+        La CVE avec ses CWE, ses vecteurs CVSS et ses premières références.
+
+    Raises:
+        ValueError: identifiant mal formé (aucun appel réseau).
+        CVENotFoundError: identifiant bien formé mais absent de la base NVD.
+        NVDError: erreur réseau ou HTTP.
+    """
+    if not CVE_ID_PATTERN.fullmatch(cve_id):
+        raise ValueError(f"Identifiant CVE invalide : {cve_id!r} (format attendu : CVE-AAAA-NNNN)")
+
+    data = _get({"cveId": cve_id})
+
+    # NVD répond 200 avec totalResults = 0 pour un identifiant inconnu
+    vulnerabilities = data.get("vulnerabilities", [])
+    if not vulnerabilities:
+        raise CVENotFoundError(f"{cve_id} introuvable dans la base NVD.")
+
+    return _parse_cve_details(vulnerabilities[0].get("cve", {}))
