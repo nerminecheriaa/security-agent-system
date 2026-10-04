@@ -5,11 +5,26 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-llm = ChatGroq(
-    model="llama-3.1-8b-instant",
-    api_key=os.getenv("GROQ_API_KEY"),
-    temperature=0.3
-)
+_llm = None
+
+def get_llm() -> ChatGroq:
+    """
+    Crée le client Groq au premier appel (pas à l'import),
+    pour que l'API puisse démarrer sans clé.
+    """
+    global _llm
+    if _llm is None:
+        api_key = os.getenv("GROQ_API_KEY")
+        if not api_key:
+            raise RuntimeError(
+                "GROQ_API_KEY is not set. Add it to your .env file (see .env.example)."
+            )
+        _llm = ChatGroq(
+            model="llama-3.1-8b-instant",
+            api_key=api_key,
+            temperature=0.3
+        )
+    return _llm
 
 SYSTEM_PROMPT = """You are a cybersecurity expert specialized in vulnerability analysis.
 Your role is to analyze CVE data and produce a clear, structured summary.
@@ -61,7 +76,7 @@ Respond with a clear structured analysis."""
         HumanMessage(content=user_prompt)
     ]
 
-    response = llm.invoke(messages)
+    response = get_llm().invoke(messages)
 
     print(f" [Summarizer] Analyse terminée.")
 

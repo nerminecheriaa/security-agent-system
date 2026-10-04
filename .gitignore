@@ -3,5 +3,6 @@ venv/
 __pycache__/
 *.pyc
 *.md
+!README.md
 reports/
 .pytest_cache/
