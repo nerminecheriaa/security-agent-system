@@ -1,7 +1,7 @@
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Literal, Optional
 import uuid
 import os
 from dotenv import load_dotenv
@@ -29,12 +29,18 @@ results_store: dict = {}
 class AnalysisRequest(BaseModel):
     keyword: str = Field(..., min_length=2, max_length=100, example="apache")
     max_results: Optional[int] = Field(default=5, ge=1, le=20)
+    days: Optional[int] = Field(
+        default=None, ge=1, le=120,
+        description="Fenêtre de publication en jours (défaut : 120 avec un mot-clé)"
+    )
+    severity: Optional[Literal["LOW", "MEDIUM", "HIGH", "CRITICAL"]] = None
 
 class AnalysisResponse(BaseModel):
     job_id: str
     keyword: str
     status: str
     cve_count: int
+    message: Optional[str] = None
     critical_count: int
     high_count: int
     medium_count: int
@@ -63,13 +69,19 @@ def analyze(request: AnalysisRequest):
     job_id = str(uuid.uuid4())[:8]
 
     try:
-        result = run_security_analysis(request.keyword, request.max_results)
+        result = run_security_analysis(
+            request.keyword,
+            request.max_results,
+            days=request.days,
+            severity=request.severity,
+        )
 
         response = AnalysisResponse(
             job_id=job_id,
             keyword=result["keyword"],
             status=result["status"],
             cve_count=result["cve_count"],
+            message=result.get("message"),
             critical_count=result["critical_count"],
             high_count=result["high_count"],
             medium_count=result["medium_count"],

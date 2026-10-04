@@ -1,8 +1,9 @@
-from typing import TypedDict, Annotated
+from typing import TypedDict, Annotated, Optional
 from langgraph.graph import StateGraph, END
 from agents.researcher import researcher_agent
 from agents.summarizer import summarizer_agent
 from agents.report_writer import report_writer_agent
+from utils.nvd_client import Severity
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -11,8 +12,11 @@ load_dotenv()
 class AgentState(TypedDict):
     keyword: str
     max_results: int
+    days: Optional[int]
+    severity: Optional[str]
     cves: list
     cve_count: int
+    message: Optional[str]
     summary: str
     critical_count: int
     high_count: int
@@ -23,11 +27,17 @@ class AgentState(TypedDict):
 
 # ── Nœuds du graphe ────────────────────────────────────────────────────────
 def node_researcher(state: AgentState) -> AgentState:
-    result = researcher_agent(state["keyword"], state.get("max_results", 5))
+    result = researcher_agent(
+        state["keyword"],
+        state.get("max_results", 5),
+        days=state.get("days"),
+        severity=state.get("severity"),
+    )
     return {
         **state,
         "cves": result["cves"],
         "cve_count": result["count"],
+        "message": result["message"],
         "status": "researched"
     }
 
@@ -35,7 +45,8 @@ def node_summarizer(state: AgentState) -> AgentState:
     result = summarizer_agent(state["keyword"], state["cves"])
     return {
         **state,
-        "summary": result["summary"],
+        # Sans CVE, le message du Researcher (aucun résultat / erreur NVD) est plus explicite
+        "summary": state.get("message") or result["summary"],
         "critical_count": result["critical_count"],
         "high_count": result["high_count"],
         "medium_count": result["medium_count"],
@@ -73,14 +84,22 @@ def build_graph():
     return graph.compile()
 
 # ── Fonction principale ────────────────────────────────────────────────────
-def run_security_analysis(keyword: str, max_results: int = 5) -> AgentState:
+def run_security_analysis(
+    keyword: str,
+    max_results: int = 5,
+    days: Optional[int] = None,
+    severity: Optional[Severity] = None,
+) -> AgentState:
     app = build_graph()
 
     initial_state = AgentState(
         keyword=keyword,
         max_results=max_results,
+        days=days,
+        severity=severity,
         cves=[],
         cve_count=0,
+        message=None,
         summary="",
         critical_count=0,
         high_count=0,
