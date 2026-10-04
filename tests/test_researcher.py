@@ -1,8 +1,13 @@
+import asyncio
 from unittest.mock import MagicMock
 
 import requests
 
-from agents.researcher import researcher_agent
+from agents import researcher
+
+
+def researcher_agent(*args, **kwargs):
+    return asyncio.run(researcher.researcher_agent(*args, **kwargs))
 
 NVD_RESPONSE = {
     "totalResults": 2,

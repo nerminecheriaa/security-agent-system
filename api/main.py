@@ -61,7 +61,7 @@ def health():
     return {"status": "healthy", "agents": ["researcher", "summarizer", "report_writer"]}
 
 @app.post("/analyze", response_model=AnalysisResponse)
-def analyze(request: AnalysisRequest):
+async def analyze(request: AnalysisRequest):
     """
     Lance une analyse complète multi-agent pour un mot-clé donné.
     Enchaîne : Researcher → Summarizer → Report Writer
@@ -69,7 +69,7 @@ def analyze(request: AnalysisRequest):
     job_id = str(uuid.uuid4())[:8]
 
     try:
-        result = run_security_analysis(
+        result = await run_security_analysis(
             request.keyword,
             request.max_results,
             days=request.days,

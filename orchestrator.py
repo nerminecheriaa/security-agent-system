@@ -26,8 +26,9 @@ class AgentState(TypedDict):
     status: str
 
 # ── Nœuds du graphe ────────────────────────────────────────────────────────
-def node_researcher(state: AgentState) -> AgentState:
-    result = researcher_agent(
+# Nœud async (appel MCP) ; les nœuds sync sont exécutés par LangGraph dans un thread sous ainvoke
+async def node_researcher(state: AgentState) -> AgentState:
+    result = await researcher_agent(
         state["keyword"],
         state.get("max_results", 5),
         days=state.get("days"),
@@ -84,7 +85,7 @@ def build_graph():
     return graph.compile()
 
 # ── Fonction principale ────────────────────────────────────────────────────
-def run_security_analysis(
+async def run_security_analysis(
     keyword: str,
     max_results: int = 5,
     days: Optional[int] = None,
@@ -113,7 +114,7 @@ def run_security_analysis(
     print(f" Starting Security Analysis for: '{keyword}'")
     print(f"{'='*50}\n")
 
-    result = app.invoke(initial_state)
+    result = await app.ainvoke(initial_state)
 
     print(f"\n{'='*50}")
     print(f" Analysis Complete! Status: {result['status']}")
