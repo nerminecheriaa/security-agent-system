@@ -202,3 +202,31 @@ def test_stdio_server_lists_tools_and_reports_errors():
     assert "Error executing tool search_cves" in message
     assert "less than or equal to 120" in message
     assert "Traceback" not in message
+
+
+# ── Chargement de .env par le serveur ──────────────────────────────────────
+def test_server_loads_only_nvd_variables_from_dotenv(monkeypatch, tmp_path):
+    from mcp_server.server import load_nvd_env
+
+    dotenv = tmp_path / ".env"
+    dotenv.write_text("GROQ_API_KEY=groq-secret\nNVD_API_KEY=nvd-from-file\nOTHER=x\n")
+    for key in ("GROQ_API_KEY", "NVD_API_KEY", "NVD_API_BASE", "OTHER"):
+        monkeypatch.delenv(key, raising=False)
+
+    load_nvd_env(str(dotenv))
+
+    assert os.environ.get("NVD_API_KEY") == "nvd-from-file"
+    assert "GROQ_API_KEY" not in os.environ
+    assert "OTHER" not in os.environ
+
+
+def test_server_keeps_nvd_variables_passed_by_client(monkeypatch, tmp_path):
+    from mcp_server.server import load_nvd_env
+
+    dotenv = tmp_path / ".env"
+    dotenv.write_text("NVD_API_KEY=nvd-from-file\n")
+    monkeypatch.setenv("NVD_API_KEY", "nvd-from-client")
+
+    load_nvd_env(str(dotenv))
+
+    assert os.environ["NVD_API_KEY"] == "nvd-from-client"

@@ -5,19 +5,33 @@ Lancement (transport stdio) : python -m mcp_server.server
 stdout est réservé au protocole MCP : les logs partent sur stderr.
 """
 import logging
+import os
 from typing import Annotated, List, Optional, TypedDict
 
 import anyio
-from dotenv import load_dotenv
+from dotenv import dotenv_values
 from mcp.server.fastmcp import FastMCP
 from pydantic import Field
 
 from utils import nvd_client
 from utils.nvd_client import CVE, MAX_DAYS, MAX_LIMIT, CVEDetails, Severity, no_results_message, resolve_days
 
-# Le client MCP ne transmet pas tout l'environnement au sous-processus :
-# NVD_API_KEY est relue depuis .env
-load_dotenv()
+DOTENV_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
+NVD_ENV_VARS = ("NVD_API_KEY", "NVD_API_BASE")
+
+
+def load_nvd_env(path: str = DOTENV_PATH) -> None:
+    """
+    Lit uniquement les variables NVD depuis .env (lancement autonome du serveur).
+    Les autres secrets du fichier, dont GROQ_API_KEY, ne sont jamais chargés ;
+    les variables déjà transmises par le client MCP sont prioritaires.
+    """
+    for key, value in dotenv_values(path).items():
+        if key in NVD_ENV_VARS and value and not os.environ.get(key):
+            os.environ[key] = value
+
+
+load_nvd_env()
 
 logger = logging.getLogger(__name__)
 
